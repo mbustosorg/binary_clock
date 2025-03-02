@@ -13,8 +13,10 @@
 """
 
 import asyncio
+import datetime
 import logging
 from logging.handlers import RotatingFileHandler
+import math
 
 import python_weather
 import colorbrewer
@@ -22,12 +24,13 @@ from pixelblaze import Pixelblaze
 
 FORMAT = "%(asctime)s-%(module)s-%(lineno)d-%(message)s"
 logger = logging.getLogger("binary-clock")
-logger.setLevel(logging.INFO)
 
-FILE_HANDLER = RotatingFileHandler("binary-clock.log", maxBytes=40000, backupCount=5)
-FILE_HANDLER.setLevel(logging.INFO)
-FILE_HANDLER.setFormatter(logging.Formatter(FORMAT))
-logger.addHandler(FILE_HANDLER)
+logging.basicConfig(level=logging.INFO,
+                    format=FORMAT,
+                    handlers=[
+                        RotatingFileHandler("binary-clock.log", maxBytes=40000, backupCount=5),
+                        logging.StreamHandler()
+                    ])
 
 LOWER_TEMP_BOUND = 30.0
 UPPER_TEMP_BOUND = 90.0
@@ -93,6 +96,8 @@ WEATHER_KIND = {113: 0,
 async def get_weather() -> None:
     while True:
         async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
+            now = datetime.datetime.now()
+            brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.35 + 0.05
             logger.info("Getting weather update...")
             # weather = await client.get('San+Luis+Obispo')
             weather = await client.get('Oakland')
@@ -105,18 +110,21 @@ async def get_weather() -> None:
             blue = color.split(",")[2].split(")")[0]
             logger.info(f"\tMoon phase: {weather.daily_forecasts[0].moon_phase.name}")
             logger.info(f"\tWeather: {weather.daily_forecasts[0].hourly_forecasts[4].kind.name}")
+            logger.info(f"\tBrightness: {brightness}")
             for ipAddress in Pixelblaze.EnumerateAddresses(timeout=1500):
                 with Pixelblaze(ipAddress) as pb:
+                    pb.setActivePatternByName("binary clock")
                     pb.setActiveControls({"sliderTempRed": float(red) / 256.0})
                     pb.setActiveControls({"sliderTempGreen": float(green) / 256.0})
                     pb.setActiveControls({"sliderTempBlue": float(blue) / 256.0})
                     pb.setActiveVariables({"moonIndex": float(MOON_PHASES[weather.daily_forecasts[0].moon_phase.name])})
+                    pb.setBrightnessSlider(brightness)
                     if weather.daily_forecasts[0].hourly_forecasts[4].kind.value in WEATHER_KIND:
                         pb.setActiveVariables({"weatherIndex": float(WEATHER_KIND[weather.daily_forecasts[0].hourly_forecasts[4].kind.value])})
                     else:
                         pb.setActiveVariables({"weatherIndex": -1.0})
 
-        await asyncio.sleep(600)
+        await asyncio.sleep(900)
 
 
 if __name__ == '__main__':
