@@ -17,6 +17,7 @@ import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 import math
+import os
 
 import python_weather
 import colorbrewer
@@ -94,13 +95,35 @@ WEATHER_KIND = {113: 0,
 
 
 async def get_weather() -> None:
+    pixelblazes = list(Pixelblaze.EnumerateAddresses(timeout=1500))
     while True:
         async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
+            pbs_found = False
             now = datetime.datetime.now()
-            brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.35 + 0.05
+            brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.30 + 0.01
             logger.info("Getting weather update...")
             # weather = await client.get('San+Luis+Obispo')
             weather = await client.get('Oakland')
+
+            hour = datetime.datetime.now().time().hour
+            current_daily_forecast = None
+            current_forecast = None
+            for forecast in weather.daily_forecasts[0].hourly_forecasts:
+                if forecast.time.hour >= hour + 6:
+                    current_daily_forecast = weather.daily_forecasts[0]
+                    current_forecast = forecast
+                    break
+            if not current_forecast:
+                for forecast in weather.daily_forecasts[1].hourly_forecasts:
+                    if forecast.time.hour >= hour - 18:
+                        current_daily_forecast = weather.daily_forecasts[1]
+                        current_forecast = forecast
+                        break
+            if not current_forecast:
+                logger.info(f"\tCurrent forecast logic failed")
+                current_daily_forecast = weather.daily_forecasts[0]
+                current_forecast = weather.daily_forecasts[0].hourly_forecasts[0]
+            logger.info(f"\tForecast for: {current_daily_forecast.date.strftime('%Y-%m-%d')} @ {current_forecast.time.strftime('%H:%M')}")
 
             temp_bucket = -max(0, min(10, int((weather.daily_forecasts[0].highest_temperature - LOWER_TEMP_BOUND) /
                                               (UPPER_TEMP_BOUND - LOWER_TEMP_BOUND) * 10))) + 10
@@ -110,9 +133,11 @@ async def get_weather() -> None:
             blue = color.split(",")[2].split(")")[0]
             logger.info(f"\tMoon phase: {weather.daily_forecasts[0].moon_phase.name}")
             logger.info(f"\tWeather: {weather.daily_forecasts[0].hourly_forecasts[4].kind.name}")
-            logger.info(f"\tBrightness: {brightness}")
-            for ipAddress in Pixelblaze.EnumerateAddresses(timeout=1500):
+            logger.info(f"\tBrightness: {brightness:.2f}")
+            for ipAddress in pixelblazes:
+                pbs_found = True
                 with Pixelblaze(ipAddress) as pb:
+                    logger.info(f"\tSetting parameters for: {ipAddress}")
                     pb.setActivePatternByName("binary clock")
                     pb.setActiveControls({"sliderTempRed": float(red) / 256.0})
                     pb.setActiveControls({"sliderTempGreen": float(green) / 256.0})
@@ -120,11 +145,15 @@ async def get_weather() -> None:
                     pb.setActiveVariables({"moonIndex": float(MOON_PHASES[weather.daily_forecasts[0].moon_phase.name])})
                     pb.setBrightnessSlider(brightness)
                     if weather.daily_forecasts[0].hourly_forecasts[4].kind.value in WEATHER_KIND:
-                        pb.setActiveVariables({"weatherIndex": float(WEATHER_KIND[weather.daily_forecasts[0].hourly_forecasts[4].kind.value])})
+                        pb.setActiveVariables({"weatherIndex": float(WEATHER_KIND[current_forecast.kind.value])})
                     else:
                         pb.setActiveVariables({"weatherIndex": -1.0})
+            if not pbs_found:
+                logger.info("Rebooting due to zero PixelBlaze computers found on he network")
+                os.system("sudo reboot")
+            logger.info("Complete")
 
-        await asyncio.sleep(900)
+            await asyncio.sleep(500)
 
 
 if __name__ == '__main__':
