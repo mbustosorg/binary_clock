@@ -6,3 +6,4 @@ __pycache__
 config/
 data/
 images/sound*
+*.log*

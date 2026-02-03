@@ -100,7 +100,7 @@ async def get_weather() -> None:
         async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
             pbs_found = False
             now = datetime.datetime.now()
-            brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.30 + 0.01
+            brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.30 + 0.04
             logger.info("Getting weather update...")
             # weather = await client.get('San+Luis+Obispo')
             weather = await client.get('Oakland')
@@ -131,25 +131,35 @@ async def get_weather() -> None:
             red = color.split(",")[0].split("(")[1]
             green = color.split(",")[1]
             blue = color.split(",")[2].split(")")[0]
+            pattern_name = "binary clock - shooting star"
+            logger.info(f"\tPattern name: {pattern_name}")
             logger.info(f"\tMoon phase: {weather.daily_forecasts[0].moon_phase.name}")
-            logger.info(f"\tWeather: {weather.daily_forecasts[0].hourly_forecasts[4].kind.name}")
+            logger.info(f"\tToday Weather: {weather.daily_forecasts[0].hourly_forecasts[4].kind.name}")
+            logger.info(f"\tTomorrow Weather: {weather.daily_forecasts[1].hourly_forecasts[4].kind.name}")
+            logger.info(f"\tWeather in 6 Hours: {current_forecast.kind.name}")
             logger.info(f"\tBrightness: {brightness:.2f}")
             for ipAddress in pixelblazes:
-                pbs_found = True
                 with Pixelblaze(ipAddress) as pb:
+                    try:
+                        config = Pixelblaze(ipAddress).getConfigSettings()
+                        if config["name"] != "rafa_binary_clock":
+                            continue
+                    except:
+                        continue
+                    pbs_found = True
                     logger.info(f"\tSetting parameters for: {ipAddress}")
-                    pb.setActivePatternByName("binary clock")
+                    pb.setActivePatternByName(pattern_name)
                     pb.setActiveControls({"sliderTempRed": float(red) / 256.0})
                     pb.setActiveControls({"sliderTempGreen": float(green) / 256.0})
                     pb.setActiveControls({"sliderTempBlue": float(blue) / 256.0})
                     pb.setActiveVariables({"moonIndex": float(MOON_PHASES[weather.daily_forecasts[0].moon_phase.name])})
                     pb.setBrightnessSlider(brightness)
-                    if weather.daily_forecasts[0].hourly_forecasts[4].kind.value in WEATHER_KIND:
+                    if current_forecast.kind.value in WEATHER_KIND:
                         pb.setActiveVariables({"weatherIndex": float(WEATHER_KIND[current_forecast.kind.value])})
                     else:
                         pb.setActiveVariables({"weatherIndex": -1.0})
             if not pbs_found:
-                logger.info("Rebooting due to zero PixelBlaze computers found on he network")
+                logger.info("Rebooting due to rafa_binary_clock not found on the network")
                 os.system("sudo reboot")
             logger.info("Complete")
 
