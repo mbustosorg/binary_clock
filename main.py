@@ -95,75 +95,82 @@ WEATHER_KIND = {113: 0,
 
 
 async def get_weather() -> None:
-    pixelblazes = list(Pixelblaze.EnumerateAddresses(timeout=1500))
+    pixelblazes = list(Pixelblaze.EnumerateAddresses(timeout=5000))
+    clock_ipaddress = None
+    for ipAddress in pixelblazes:
+        with Pixelblaze(ipAddress) as pb:
+            logger.info(f"Checking to see if '{ipAddress}' is the correct one...")
+            config = pb.getConfigSettings()
+            if config["name"] == "rafa_binary_clock":
+                clock_ipaddress = ipAddress
+                logger.info(f"Found rafa_binary_clock at '{clock_ipaddress}'")
+                break
+    if clock_ipaddress is None:
+        logger.info("Rebooting due to rafa_binary_clock not found on the network")
+        os.system("sudo reboot")
     while True:
         async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
-            pbs_found = False
-            now = datetime.datetime.now()
-            brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.30 + 0.04
-            logger.info("Getting weather update...")
-            # weather = await client.get('San+Luis+Obispo')
-            weather = await client.get('Oakland')
+            try:
+                now = datetime.datetime.now()
+                brightness = (-math.cos((now.hour + (now.minute / 60.0)) / 24.0 * 2.0 * math.pi) + 1.0) / 2.0 * 0.30 + 0.04
+                logger.info("Getting weather update...")
+                # weather = await client.get('San+Luis+Obispo')
+                weather = await client.get('Oakland')
 
-            hour = datetime.datetime.now().time().hour
-            current_daily_forecast = None
-            current_forecast = None
-            for forecast in weather.daily_forecasts[0].hourly_forecasts:
-                if forecast.time.hour >= hour + 6:
-                    current_daily_forecast = weather.daily_forecasts[0]
-                    current_forecast = forecast
-                    break
-            if not current_forecast:
-                for forecast in weather.daily_forecasts[1].hourly_forecasts:
-                    if forecast.time.hour >= hour - 18:
-                        current_daily_forecast = weather.daily_forecasts[1]
+                hour = datetime.datetime.now().time().hour
+                current_daily_forecast = None
+                current_forecast = None
+                for forecast in weather.daily_forecasts[0].hourly_forecasts:
+                    if forecast.time.hour >= hour + 6:
+                        current_daily_forecast = weather.daily_forecasts[0]
                         current_forecast = forecast
                         break
-            if not current_forecast:
-                logger.info(f"\tCurrent forecast logic failed")
-                current_daily_forecast = weather.daily_forecasts[0]
-                current_forecast = weather.daily_forecasts[0].hourly_forecasts[0]
-            logger.info(f"\tForecast for: {current_daily_forecast.date.strftime('%Y-%m-%d')} @ {current_forecast.time.strftime('%H:%M')}")
+                if not current_forecast:
+                    for forecast in weather.daily_forecasts[1].hourly_forecasts:
+                        if forecast.time.hour >= hour - 18:
+                            current_daily_forecast = weather.daily_forecasts[1]
+                            current_forecast = forecast
+                            break
+                if not current_forecast:
+                    logger.info(f"\tCurrent forecast logic failed")
+                    current_daily_forecast = weather.daily_forecasts[0]
+                    current_forecast = weather.daily_forecasts[0].hourly_forecasts[0]
+                logger.info(f"\tForecast for: {current_daily_forecast.date.strftime('%Y-%m-%d')} @ {current_forecast.time.strftime('%H:%M')}")
 
-            temp_bucket = -max(0, min(10, int((weather.daily_forecasts[0].highest_temperature - LOWER_TEMP_BOUND) /
-                                              (UPPER_TEMP_BOUND - LOWER_TEMP_BOUND) * 10))) + 10
-            color = colorbrewer.diverging["RdBu"][11][temp_bucket]
-            red = color.split(",")[0].split("(")[1]
-            green = color.split(",")[1]
-            blue = color.split(",")[2].split(")")[0]
-            pattern_name = "binary clock - shooting star"
-            logger.info(f"\tPattern name: {pattern_name}")
-            logger.info(f"\tMoon phase: {weather.daily_forecasts[0].moon_phase.name}")
-            logger.info(f"\tToday Weather: {weather.daily_forecasts[0].hourly_forecasts[4].kind.name}")
-            logger.info(f"\tTomorrow Weather: {weather.daily_forecasts[1].hourly_forecasts[4].kind.name}")
-            logger.info(f"\tWeather in 6 Hours: {current_forecast.kind.name}")
-            logger.info(f"\tBrightness: {brightness:.2f}")
-            for ipAddress in pixelblazes:
-                with Pixelblaze(ipAddress) as pb:
-                    try:
-                        config = Pixelblaze(ipAddress).getConfigSettings()
-                        if config["name"] != "rafa_binary_clock":
-                            continue
-                    except:
-                        continue
-                    pbs_found = True
+                temp_bucket = -max(0, min(10, int((weather.daily_forecasts[0].highest_temperature - LOWER_TEMP_BOUND) /
+                                                  (UPPER_TEMP_BOUND - LOWER_TEMP_BOUND) * 10))) + 10
+                color = colorbrewer.diverging["RdBu"][11][temp_bucket]
+                red = color.split(",")[0].split("(")[1]
+                green = color.split(",")[1]
+                blue = color.split(",")[2].split(")")[0]
+                pattern_name = "binary clock - shooting star"
+                logger.info(f"\tPattern name: {pattern_name}")
+                logger.info(f"\tMoon phase: {weather.daily_forecasts[0].moon_phase.name}")
+                logger.info(f"\tToday Weather: {weather.daily_forecasts[0].hourly_forecasts[4].kind.name}")
+                logger.info(f"\tTomorrow Weather: {weather.daily_forecasts[1].hourly_forecasts[4].kind.name}")
+                logger.info(f"\tWeather in 6 Hours: {current_forecast.kind.name}")
+                logger.info(f"\tBrightness: {brightness:.2f}")
+                with Pixelblaze(clock_ipaddress) as pb:
                     logger.info(f"\tSetting parameters for: {ipAddress}")
-                    pb.setActivePatternByName(pattern_name)
-                    pb.setActiveControls({"sliderTempRed": float(red) / 256.0})
-                    pb.setActiveControls({"sliderTempGreen": float(green) / 256.0})
-                    pb.setActiveControls({"sliderTempBlue": float(blue) / 256.0})
-                    pb.setActiveVariables({"moonIndex": float(MOON_PHASES[weather.daily_forecasts[0].moon_phase.name])})
-                    pb.setBrightnessSlider(brightness)
-                    if current_forecast.kind.value in WEATHER_KIND:
-                        pb.setActiveVariables({"weatherIndex": float(WEATHER_KIND[current_forecast.kind.value])})
-                    else:
-                        pb.setActiveVariables({"weatherIndex": -1.0})
-            if not pbs_found:
-                logger.info("Rebooting due to rafa_binary_clock not found on the network")
-                os.system("sudo reboot")
-            logger.info("Complete")
-
-            await asyncio.sleep(500)
+                    try:
+                        pb.setActivePatternByName(pattern_name)
+                        pb.setActiveControls({"sliderTempRed": float(red) / 256.0})
+                        pb.setActiveControls({"sliderTempGreen": float(green) / 256.0})
+                        pb.setActiveControls({"sliderTempBlue": float(blue) / 256.0})
+                        pb.setActiveVariables({"moonIndex": float(MOON_PHASES[weather.daily_forecasts[0].moon_phase.name])})
+                        pb.setBrightnessSlider(brightness)
+                        if current_forecast.kind.value in WEATHER_KIND:
+                            pb.setActiveVariables({"weatherIndex": float(WEATHER_KIND[current_forecast.kind.value])})
+                        else:
+                            pb.setActiveVariables({"weatherIndex": -1.0})
+                    except Exception as e:
+                        logger.info(f"Exception during setting variables {e}")
+                        os.system("sudo reboot")
+                logger.info("Complete")
+            except Exception as e:
+                logger.info(f"Exception during setting weather and variables {e}")
+                #os.system("sudo reboot")
+            await asyncio.sleep(900)
 
 
 if __name__ == '__main__':

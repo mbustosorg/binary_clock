@@ -7,3 +7,4 @@ config/
 data/
 images/sound*
 *.log*
+venv/
